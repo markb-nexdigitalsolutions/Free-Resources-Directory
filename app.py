@@ -1,12 +1,23 @@
 import math
+import re
 import traceback
+import requests
 import streamlit as st
+from urllib.parse import quote_plus
 
+# -----------------------------
+# Streamlit config
+# -----------------------------
 st.set_page_config(page_title="Free Resources Directory", page_icon="🏛️", layout="wide")
 
-# -----------------------------
-# Seed data
-# -----------------------------
+CATEGORY_ICONS = {
+    "housing": "🏠","food": "🍽️","healthcare": "🏥","employment": "💼",
+    "education": "📚","financial": "💰","legal": "⚖️","family": "👨‍👩‍👧‍👦",
+}
+
+# ------------------------------------
+# Local demo data (fallback if needed)
+# ------------------------------------
 BASE_RESOURCES = [
     {"name": "City Housing Authority","type": "government","category": "housing",
      "services": ["Rental assistance","Housing vouchers","Emergency shelter"],
@@ -60,15 +71,10 @@ BASE_RESOURCES = [
      "eligibility": "Adults 60 and older"},
 ]
 
-CATEGORY_ICONS = {
-    "housing": "🏠","food": "🍽️","healthcare": "🏥","employment": "💼",
-    "education": "📚","financial": "💰","legal": "⚖️","family": "👨‍👩‍👧‍👦",
-}
-
-# -----------------------------
-# Helpers
-# -----------------------------
-def synthesize_resources(n=100):
+# ------------------------------------
+# Helpers: UI, scoring, fallbacks
+# ------------------------------------
+def synthesize_resources(n=36):
     items = list(BASE_RESOURCES)
     i = 0
     while len(items) < n:
@@ -81,61 +87,25 @@ def synthesize_resources(n=100):
         i += 1
     return items[:n]
 
-def score_resource(resource, q):
+def personalized_tip(q, n):
     q = (q or "").lower()
-    score = 0
-    keywords = {
-        "housing": ["rent","housing","apartment","eviction","homeless","shelter","utilities","electric","gas","water","heat"],
-        "food": ["food","hungry","meal","groceries","snap","food stamps","nutrition"],
-        "healthcare": ["medical","doctor","hospital","medicine","health","sick","insurance","medicaid"],
-        "employment": ["job","work","unemployed","career","training","resume","interview"],
-        "financial": ["money","cash","bills","debt","financial","assistance","emergency"],
-        "legal": ["legal","lawyer","court","rights","law","attorney"],
-        "education": ["school","education","scholarship","college","student","tuition"],
-        "family": ["child","family","kids","parenting","daycare","childcare"],
-    }
-    for kw in keywords.get(resource["category"], []):
-        if kw in q: score += 10
-    for s in resource["services"]:
-        if s.lower() in q: score += 15
-    for w in resource["description"].lower().split():
-        if len(w) > 3 and w in q: score += 5
-    for w in ["emergency","urgent","immediately","asap","crisis","shut off","eviction"]:
-        if w in q: score += 20
-    return score
-
-def smart_match(resources, q):
-    scored = []
-    for r in resources:
-        s = score_resource(r, q)
-        if s > 0:
-            scored.append((s, r))
-    if not scored:
-        return list(resources)
-    scored.sort(key=lambda x: x[0], reverse=True)
-    top = [r for _, r in scored]
-    expanded = list(top)
-    for idx, r in enumerate(top[:5]):
-        for i in range(1, 11):
-            clone = dict(r)
-            clone["name"] = "{} - Branch {}".format(r["name"], i)
-            base_addr = r["address"].split(",")[0]
-            rest = ", ".join(r["address"].split(",")[1:]) if "," in r["address"] else ""
-            clone["address"] = "{} #{}".format(base_addr, 300 + idx * 10 + i) + (", " + rest if rest else "")
-            clone["phone"] = "(555) {:03d}-{:04d}".format(200 + (idx * 10 + i), 2000 + (idx * 100 + i))
-            expanded.append(clone)
-    return expanded[:50]
+    if ("rent" in q) or ("eviction" in q):
+        return "💡 Found {} resources for housing help! Many offer emergency rental assistance.".format(n)
+    if ("food" in q) or ("hungry" in q):
+        return "💡 Found {} food resources! Most food banks don't require appointments.".format(n)
+    if ("job" in q) or ("unemployed" in q):
+        return "💡 Found {} employment resources! Many offer same-day resume help and placements.".format(n)
+    if ("medical" in q) or ("health" in q):
+        return "💡 Found {} healthcare resources! Several offer free services regardless of insurance.".format(n)
+    return "💡 Found {} resources that can help your situation! Many offer immediate assistance.".format(n)
 
 def card(resource, min_height=360):
-    """
-    Equal-height card using flex column layout.
-    """
-    icon = CATEGORY_ICONS.get(resource["category"], "📋")
+    icon = CATEGORY_ICONS.get(resource.get("category",""), "📋")
+    services = resource.get("services") or []
     services_html = "".join(
         "<span style='background:#eff6ff;color:#1d4ed8;border-radius:8px;padding:4px 8px;font-size:.85rem;margin:2px;display:inline-block;'>{}</span>".format(s)
-        for s in resource["services"]
+        for s in services
     )
-    # wrapper ensures equal height
     return (
         "<div style='background:#fff;border-radius:16px;box-shadow:0 10px 25px rgba(0,0,0,.06);"
         "padding:16px;display:flex;flex-direction:column;justify-content:space-between;"
@@ -163,104 +133,205 @@ def card(resource, min_height=360):
         "</div>"
     ).format(
         min_h=min_height,
-        name=resource["name"],
-        type=resource["type"],
+        name=resource.get("name",""),
+        type=resource.get("type",""),
         icon=icon,
-        category=resource["category"],
-        desc=resource["description"],
+        category=resource.get("category",""),
+        desc=resource.get("description",""),
         services_html=services_html,
-        phone=resource["phone"],
-        address=resource["address"],
-        elig=resource["eligibility"],
+        phone=resource.get("phone",""),
+        address=resource.get("address",""),
+        elig=resource.get("eligibility",""),
     )
 
-def personalized_tip(q, n):
-    q = (q or "").lower()
-    if ("rent" in q) or ("eviction" in q):
-        return "💡 Found {} resources for housing help! Many offer emergency rental assistance.".format(n)
-    if ("food" in q) or ("hungry" in q):
-        return "💡 Found {} food resources! Most food banks don't require appointments.".format(n)
-    if ("job" in q) or ("unemployed" in q):
-        return "💡 Found {} employment resources! Many offer same-day resume help and placements.".format(n)
-    if ("medical" in q) or ("health" in q):
-        return "💡 Found {} healthcare resources! Several offer free services regardless of insurance.".format(n)
-    return "💡 Found {} resources that can help your situation! Many offer immediate assistance.".format(n)
+# ------------------------------------
+# FREE, OPEN GOV PROVIDERS (NO KEYS)
+# ------------------------------------
+def norm_item(name, category, address, phone="", website="", email="", desc="", type_="nonprofit", eligibility=""):
+    return {
+        "name": name, "type": type_, "category": category, "services": [],
+        "phone": phone, "email": email, "website": website,
+        "address": address, "description": desc, "eligibility": eligibility,
+    }
 
-# -----------------------------
+def _safe_get(url, params=None, timeout=12):
+    try:
+        r = requests.get(url, params=params, timeout=timeout)
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        return None
+
+# HRSA: Federally supported health centers (clinics) — NO KEY
+def fetch_hrsa(zip_code=None, lat=None, lon=None, radius_mi=25):
+    base = "https://data.hrsa.gov/HDWAPI3_External/api/v1"
+    if zip_code:
+        url = "{}/GetHealthCentersByArea".format(base); params = {"ZipCode": str(zip_code)}
+    elif lat and lon:
+        url = "{}/GetHealthCentersAroundALocation".format(base); params = {"Latitude": lat, "Longitude": lon, "Radius": radius_mi}
+    else:
+        return []
+    data = _safe_get(url, params)
+    items = []
+    if not data or "HCC" not in data: return items
+    for row in data["HCC"]:
+        addr = ", ".join(filter(None, [
+            row.get("SITE_ADDRESS",""), row.get("SITE_CITY",""), row.get("SITE_STATE_ABBR",""), row.get("SITE_ZIP","")
+        ]))
+        items.append(norm_item(
+            name=row.get("SITE_NM","Health Center"),
+            category="healthcare",
+            address=addr,
+            phone=row.get("SITE_PHONE_NUM",""),
+            website=row.get("SITE_URL","") or "",
+            desc=row.get("HCC_LOC_DESC","Community health center"),
+            type_="nonprofit"
+        ))
+    return items
+
+# HUD: Public Housing Authorities — NO KEY
+def fetch_hud_phas(limit=50):
+    url = "https://services.arcgis.com/hRUr1F8lE8Jq2uJo/arcgis/rest/services/Public_Housing_Authorities/FeatureServer/0/query"
+    params = {"where":"1=1","outFields":"*","f":"json","resultRecordCount":limit}
+    data = _safe_get(url, params)
+    items = []
+    if not data or "features" not in data: return items
+    for f in data["features"]:
+        a = f.get("attributes", {})
+        name = a.get("PHA_NAME") or a.get("NAME") or "Public Housing Authority"
+        addr = a.get("ADDRESS") or ""
+        phone = a.get("PHONE") or ""
+        web = a.get("WEBSITE") or ""
+        items.append(norm_item(
+            name=name, category="housing", address=addr, phone=phone, website=web,
+            desc="Public Housing Authority", type_="government", eligibility="Varies by program"
+        ))
+    return items
+
+# HUD: Public Housing Developments (addresses) — NO KEY
+def fetch_hud_developments(limit=50):
+    url = "https://services.arcgis.com/hRUr1F8lE8Jq2uJo/arcgis/rest/services/Public_Housing_Developments/FeatureServer/0/query"
+    params = {"where":"1=1","outFields":"*","f":"json","resultRecordCount":limit}
+    data = _safe_get(url, params)
+    items = []
+    if not data or "features" not in data: return items
+    for f in data["features"]:
+        a = f.get("attributes", {})
+        name = a.get("DEV_NAME") or "Public Housing Development"
+        pha = a.get("PHA_NAME") or ""
+        addr = a.get("DEV_ADDRESS") or ""
+        items.append(norm_item(
+            name="{} ({})".format(name, pha) if pha else name,
+            category="housing", address=addr, type_="government",
+            desc="HUD public housing development"
+        ))
+    return items
+
+def get_resources_free(query, city_or_zip):
+    # Try to infer a ZIP (simple)
+    zip_guess = None
+    if city_or_zip:
+        m = re.search(r"\b\d{5}\b", city_or_zip)
+        if m: zip_guess = m.group(0)
+
+    results = []
+    # Healthcare (HRSA) near ZIP (if provided)
+    if zip_guess:
+        results += fetch_hrsa(zip_code=zip_guess)
+
+    # Housing (HUD national)
+    results += fetch_hud_phas(limit=50)
+    results += fetch_hud_developments(limit=50)
+
+    # Fallback to local demo if nothing
+    if not results:
+        results = synthesize_resources(36)
+
+    # Quick keyword relevance to user's need
+    q = (query or "").lower()
+    if q:
+        def score(r):
+            text = " ".join([r.get("name",""), r.get("description",""), r.get("category","")]).lower()
+            s = 0
+            for w in ["rent","eviction","housing","shelter","utility"]:
+                if w in q and w in text: s += 10
+            for w in ["food","pantry","meal","nutrition"]:
+                if w in q and w in text: s += 10
+            for w in ["health","clinic","medical","dental","mental"]:
+                if w in q and w in text: s += 10
+            for w in ["job","employment","career","training","workforce"]:
+                if w in q and w in text: s += 10
+            for w in ["legal","attorney","court","aid"]:
+                if w in q and w in text: s += 10
+            return s
+        results.sort(key=score, reverse=True)
+
+    return results
+
+# ------------------------------------
 # App
-# -----------------------------
+# ------------------------------------
 def main():
-    # State
-    if "all_resources" not in st.session_state:
-        st.session_state.all_resources = synthesize_resources(100)
     if "displayed" not in st.session_state:
-        st.session_state.displayed = list(st.session_state.all_resources)
+        st.session_state.displayed = synthesize_resources(36)
     if "page" not in st.session_state:
         st.session_state.page = 0
     if "tip" not in st.session_state:
         st.session_state.tip = ""
+
     PER_PAGE = 12
 
     # Header
     st.markdown(
         "<div style='text-align:center;margin-bottom:18px;'>"
         "<h1 style='margin:0;font-weight:800;color:#111827;font-size:2.2rem;'>🏛️ Free Resources Directory</h1>"
-        "<p style='color:#4b5563;max-width:720px;margin:8px auto 0;'>Discover government offices and non-profits in your city that offer free assistance, grants, and support services.</p>"
+        "<p style='color:#4b5563;max-width:780px;margin:8px auto 0;'>Find real, official resources near you—housing, clinics, food, jobs, legal aid.</p>"
         "</div>",
         unsafe_allow_html=True,
     )
 
-    # Search box
-    box = st.container(border=True)
-    with box:
+    with st.container(border=True):
         st.subheader("What do you need help with?")
         needs = st.text_area(
-            "Type your situation in your own words",
-            placeholder="e.g., I can't pay my rent this month • My electricity is about to be shut off • I need food for my family",
+            "Describe your situation",
+            placeholder="e.g., I can't pay my rent • My electricity is about to be shut off • I need food for my family",
             height=110,
             label_visibility="collapsed",
         )
-        c1, c2, c3, c4, c5, c6 = st.columns([1,1,1,1,1,1])
+        city_or_zip = st.text_input("City or ZIP (US only for live data)", placeholder="e.g., Cleveland, OH or 44110")
+
+        c1, c2, c3, c4 = st.columns([1,1,1,1])
         with c1:
             if st.button("🔍 Find Help Now", use_container_width=True):
                 q = (needs or "").strip()
                 if not q:
                     st.warning("Please tell us what you need help with first.")
                 else:
-                    matched = smart_match(st.session_state.all_resources, q)
-                    st.session_state.displayed = matched
+                    data = get_resources_free(q, (city_or_zip or "").strip())
+                    st.session_state.displayed = data
                     st.session_state.page = 0
-                    st.session_state.tip = personalized_tip(q, len(matched))
+                    st.session_state.tip = personalized_tip(q, len(data))
+
         with c2:
-            if st.button("Clear", use_container_width=True):
-                st.session_state.displayed = list(st.session_state.all_resources)
-                st.session_state.page = 0
-                st.session_state.tip = ""
+            if st.button("💰 Rent Help", use_container_width=True):
+                q = "rent assistance"
+                data = get_resources_free(q, (city_or_zip or "").strip())
+                st.session_state.displayed, st.session_state.page = data, 0
+                st.session_state.tip = personalized_tip(q, len(data))
 
         with c3:
-            if st.button("💰 Rent Help", use_container_width=True):
-                q = "rent help"
-                matched = smart_match(st.session_state.all_resources, q)
-                st.session_state.displayed, st.session_state.page = matched, 0
-                st.session_state.tip = personalized_tip(q, len(matched))
-        with c4:
             if st.button("🍽️ Food Help", use_container_width=True):
-                q = "food assistance"
-                matched = smart_match(st.session_state.all_resources, q)
-                st.session_state.displayed, st.session_state.page = matched, 0
-                st.session_state.tip = personalized_tip(q, len(matched))
-        with c5:
-            if st.button("💼 Job Help", use_container_width=True):
-                q = "job training"
-                matched = smart_match(st.session_state.all_resources, q)
-                st.session_state.displayed, st.session_state.page = matched, 0
-                st.session_state.tip = personalized_tip(q, len(matched))
-        with c6:
-            if st.button("⚡ Utility Help", use_container_width=True):
-                q = "utility bills"
-                matched = smart_match(st.session_state.all_resources, q)
-                st.session_state.displayed, st.session_state.page = matched, 0
-                st.session_state.tip = personalized_tip(q, len(matched))
+                q = "food pantry"
+                data = get_resources_free(q, (city_or_zip or "").strip())
+                st.session_state.displayed, st.session_state.page = data, 0
+                st.session_state.tip = personalized_tip(q, len(data))
+
+        with c4:
+            if st.button("🏥 Clinic Help", use_container_width=True):
+                q = "medical clinic"
+                data = get_resources_free(q, (city_or_zip or "").strip())
+                st.session_state.displayed, st.session_state.page = data, 0
+                st.session_state.tip = personalized_tip(q, len(data))
 
     # Tip banner
     if st.session_state.tip:
@@ -270,26 +341,54 @@ def main():
             "<div style='font-size:1.2rem;'>✅</div>"
             "<div>"
             "<div style='font-weight:600;'>{}</div>"
-            "<div style='font-size:.9rem;margin-top:4px;'>Tip: Call the numbers directly — most organizations have staff ready to help.</div>"
+            "<div style='font-size:.9rem;margin-top:4px;'>Tip: Start with official websites and call ahead to confirm hours.</div>"
             "</div></div></div>".format(st.session_state.tip),
             unsafe_allow_html=True,
         )
 
     # Results header
     total = len(st.session_state.displayed)
-    st.markdown("**Showing {} resources** in your area".format(total))
+    st.markdown("**Showing {} resources**".format(total))
 
     # Grid (equal-height cards)
     start = st.session_state.page * PER_PAGE
     end = min(start + PER_PAGE, total)
     cols = st.columns(3)
+
     for i in range(start, end):
         res = st.session_state.displayed[i]
         with cols[i % 3]:
-            # Card HTML (equal height)
             st.markdown(card(res, min_height=360), unsafe_allow_html=True)
-            # Streamlit button (outside HTML, consistent placement because card has fixed min-height)
-            st.button("Contact for Help", key="contact_{}".format(i), use_container_width=True)
+
+            # Contact actions: Website → Email → Phone. Always add Directions + More Info.
+            website = res.get("website") or ""
+            email = res.get("email") or ""
+            phone = res.get("phone") or ""
+            addr = res.get("address","")
+            name = res.get("name","")
+
+            row = st.columns(3)
+            with row[0]:
+                if website:
+                    st.link_button("🌐 Website", website, use_container_width=True)
+                elif email:
+                    st.link_button("✉️ Email", "mailto:{}".format(email), use_container_width=True)
+                elif phone:
+                    st.link_button("📞 Call", "tel:{}".format(phone), use_container_width=True)
+                else:
+                    st.link_button("ℹ️ Info", "https://www.google.com/search?q={}".format(
+                        quote_plus("{} {}".format(name, addr))
+                    ), use_container_width=True)
+
+            with row[1]:
+                st.link_button("📍 Directions", "https://www.google.com/maps/search/?api=1&query={}".format(
+                    quote_plus(addr if addr else name)
+                ), use_container_width=True)
+
+            with row[2]:
+                st.link_button("🔎 More Info", "https://www.google.com/search?q={}".format(
+                    quote_plus("{} {}".format(name, addr))
+                ), use_container_width=True)
 
     # Pagination
     st.write("")
@@ -297,7 +396,7 @@ def main():
     if pages > 1:
         pcols = st.columns(3)
         with pcols[0]:
-            if st.button("◀️ Previous", disabled=st.session_state.page == 0, use_container_width=True):
+            if st.button("◀️ Previous", disabled=start == 0, use_container_width=True):
                 st.session_state.page -= 1
                 st.rerun()
         with pcols[1]:
@@ -313,7 +412,7 @@ def main():
 # Safety net: show errors on-screen instead of a blank page
 try:
     main()
-except Exception as e:
+except Exception:
     st.error("An error occurred while rendering the app.")
-    st.exception(e)
+    st.exception(Exception)
     st.code(traceback.format_exc())
