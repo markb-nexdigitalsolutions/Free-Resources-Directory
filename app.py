@@ -5,7 +5,7 @@ import streamlit as st
 st.set_page_config(page_title="Free Resources Directory", page_icon="🏛️", layout="wide")
 
 # -----------------------------
-# Seed data
+# Seed data (same content, trimmed)
 # -----------------------------
 BASE_RESOURCES = [
     {"name": "City Housing Authority","type": "government","category": "housing",
@@ -66,7 +66,7 @@ CATEGORY_ICONS = {
 }
 
 # -----------------------------
-# Helpers
+# Helpers (no f-strings in large HTML chunks)
 # -----------------------------
 def synthesize_resources(n=100):
     items = list(BASE_RESOURCES)
@@ -75,6 +75,7 @@ def synthesize_resources(n=100):
         t = dict(BASE_RESOURCES[i % len(BASE_RESOURCES)])
         idx = len(items)
         t["name"] = "{} - Branch {}".format(t["name"], idx // 10 + 1)
+        # simple mutations
         t["address"] = t["address"].replace("123", str(100 + idx)).replace("456", str(100 + idx)).replace("789", str(100 + idx))
         t["phone"] = "(555) {:03d}-{:04d}".format(100 + (idx % 900), 1000 + (idx % 9000))
         items.append(t)
@@ -126,52 +127,37 @@ def smart_match(resources, q):
             expanded.append(clone)
     return expanded[:50]
 
-def card(resource, min_height=360):
-    """
-    Equal-height card using flex column layout.
-    """
+def card(resource):
     icon = CATEGORY_ICONS.get(resource["category"], "📋")
     services_html = "".join(
         "<span style='background:#eff6ff;color:#1d4ed8;border-radius:8px;padding:4px 8px;font-size:.85rem;margin:2px;display:inline-block;'>{}</span>".format(s)
         for s in resource["services"]
     )
-    # wrapper ensures equal height
     return (
-        "<div style='background:#fff;border-radius:16px;box-shadow:0 10px 25px rgba(0,0,0,.06);"
-        "padding:16px;display:flex;flex-direction:column;justify-content:space-between;"
-        "height:100%;min-height:{min_h}px;'>"
-          "<div>"
-            "<div style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;'>"
-              "<div style='font-size:1.1rem;font-weight:700;color:#111827;'>{name}</div>"
-              "<span style='padding:4px 10px;border-radius:999px;font-size:.8rem;font-weight:600;background:#e5e7eb;color:#111827;'>{type}</span>"
-            "</div>"
-            "<div style='display:flex;align-items:center;margin:6px 0 10px 0;color:#4b5563;'>"
-              "<span style='font-size:1.3rem;margin-right:8px;'>{icon}</span>"
-              "<span style='font-size:.9rem;text-transform:capitalize;'>{category}</span>"
-            "</div>"
-            "<div style='color:#4b5563;margin-bottom:10px;'>{desc}</div>"
-            "<div style='margin-bottom:12px;'>"
-              "<div style='font-weight:600;color:#111827;margin-bottom:6px;'>Services Offered:</div>"
-              "<div>{services_html}</div>"
-            "</div>"
-          "</div>"
-          "<div style='border-top:1px solid #e5e7eb;padding-top:10px;color:#4b5563;font-size:.92rem;'>"
-            "<div>📞 <a href='tel:{phone}' style='color:#1f2937;text-decoration:none;'>{phone}</a></div>"
-            "<div>📍 {address}</div>"
-            "<div>✅ <span style='font-weight:600;'>{elig}</span></div>"
-          "</div>"
+        "<div style='background:#fff;border-radius:16px;box-shadow:0 10px 25px rgba(0,0,0,.06);padding:16px;'>"
+        "<div style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;'>"
+        "<div style='font-size:1.1rem;font-weight:700;color:#111827;'>{name}</div>"
+        "<span style='padding:4px 10px;border-radius:999px;font-size:.8rem;font-weight:600;background:#e5e7eb;color:#111827;'>{type}</span>"
+        "</div>"
+        "<div style='display:flex;align-items:center;margin:6px 0 10px 0;color:#4b5563;'>"
+        "<span style='font-size:1.3rem;margin-right:8px;'>{icon}</span>"
+        "<span style='font-size:.9rem;text-transform:capitalize;'>{category}</span>"
+        "</div>"
+        "<div style='color:#4b5563;margin-bottom:10px;'>{desc}</div>"
+        "<div style='margin-bottom:12px;'>"
+        "<div style='font-weight:600;color:#111827;margin-bottom:6px;'>Services Offered:</div>"
+        "<div>{services_html}</div>"
+        "</div>"
+        "<div style='border-top:1px solid #e5e7eb;padding-top:10px;color:#4b5563;font-size:.92rem;'>"
+        "<div>📞 <a href='tel:{phone}' style='color:#1f2937;text-decoration:none;'>{phone}</a></div>"
+        "<div>📍 {address}</div>"
+        "<div>✅ <span style='font-weight:600;'>{elig}</span></div>"
+        "</div>"
         "</div>"
     ).format(
-        min_h=min_height,
-        name=resource["name"],
-        type=resource["type"],
-        icon=icon,
-        category=resource["category"],
-        desc=resource["description"],
-        services_html=services_html,
-        phone=resource["phone"],
-        address=resource["address"],
-        elig=resource["eligibility"],
+        name=resource["name"], type=resource["type"], icon=icon, category=resource["category"],
+        desc=resource["description"], services_html=services_html, phone=resource["phone"],
+        address=resource["address"], elig=resource["eligibility"]
     )
 
 def personalized_tip(q, n):
@@ -187,7 +173,7 @@ def personalized_tip(q, n):
     return "💡 Found {} resources that can help your situation! Many offer immediate assistance.".format(n)
 
 # -----------------------------
-# App
+# App (wrapped so we can show errors)
 # -----------------------------
 def main():
     # State
@@ -210,7 +196,7 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # Search box
+    # Smart Search
     box = st.container(border=True)
     with box:
         st.subheader("What do you need help with?")
@@ -279,16 +265,14 @@ def main():
     total = len(st.session_state.displayed)
     st.markdown("**Showing {} resources** in your area".format(total))
 
-    # Grid (equal-height cards)
+    # Grid
     start = st.session_state.page * PER_PAGE
     end = min(start + PER_PAGE, total)
     cols = st.columns(3)
     for i in range(start, end):
         res = st.session_state.displayed[i]
         with cols[i % 3]:
-            # Card HTML (equal height)
-            st.markdown(card(res, min_height=360), unsafe_allow_html=True)
-            # Streamlit button (outside HTML, consistent placement because card has fixed min-height)
+            st.markdown(card(res), unsafe_allow_html=True)
             st.button("Contact for Help", key="contact_{}".format(i), use_container_width=True)
 
     # Pagination
@@ -310,7 +294,7 @@ def main():
                 st.session_state.page += 1
                 st.rerun()
 
-# Safety net: show errors on-screen instead of a blank page
+# Run with a safety net so crashes show on-screen instead of a blank page
 try:
     main()
 except Exception as e:
