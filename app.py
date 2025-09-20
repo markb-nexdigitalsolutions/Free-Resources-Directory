@@ -229,8 +229,12 @@ def card(resource):
 def personalized_tip(q: str, n: int) -> str:
     q = q.lower()
     if "rent" in q or "eviction" in q:
-        return f"💡 Found {n} resources for housing help! Many offer emergency rental assistance."
+        return "💡 Found {} resources for housing help! Many offer emergency rental assistance.".format(n)
     if "food" in q or "hungry" in q:
-        return f"💡 Found {n} food resources! Most food banks don’t require appointments."
+        return "💡 Found {} food resources! Most food banks don't require appointments.".format(n)
     if "job" in q or "unemployed" in q:
-        return f"💡 Found {n} employment resources! Many offer same-day
+        return "💡 Found {} employment resources! Many offer same-day resume help and placements.".format(n)
+    if "medical" in q or "health" in q:
+        return "💡 Found {} healthcare resources! Several offer free services regardless of insurance.".format(n)
+    return "💡 Found {} resources that can help your situation! Many offer immediate assistance.".format(n)
+
